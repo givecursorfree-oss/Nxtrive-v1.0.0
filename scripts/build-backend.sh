@@ -11,13 +11,7 @@ fi
 
 TRIPLE="${BACKEND_TARGET_TRIPLE:-$DEFAULT_TRIPLE}"
 
-ARCH_PREFIX=()
-if [[ "$(uname -s)" == "Darwin" && "$TRIPLE" == "x86_64-apple-darwin" && "$(uname -m)" == "arm64" ]]; then
-  ARCH_PREFIX=(arch -x86_64)
-  echo "Building x86_64 backend via Rosetta (host is arm64)..."
-fi
-
-"${ARCH_PREFIX[@]}" python3 -m venv .venv
+python3 -m venv .venv
 # shellcheck disable=SC1091
 source .venv/bin/activate
 pip install --upgrade pip
@@ -28,7 +22,7 @@ SIDEcar_ROOT="$(cd .. && pwd)/src-tauri/sidecar"
 DIST_FOLDER="$SIDEcar_ROOT/nxtrive-backend"
 DEST_DIR="$(cd .. && pwd)/src-tauri/binaries"
 
-"${ARCH_PREFIX[@]}" pyinstaller build_backend.spec --clean --noconfirm --distpath "$SIDEcar_ROOT" --workpath ./build/pyinstaller
+pyinstaller build_backend.spec --clean --noconfirm --distpath "$SIDEcar_ROOT" --workpath ./build/pyinstaller
 
 SOURCE_EXE="$DIST_FOLDER/nxtrive-backend"
 DEST_EXE="$DEST_DIR/nxtrive-backend-$TRIPLE"

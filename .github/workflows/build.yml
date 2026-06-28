@@ -15,15 +15,15 @@ jobs:
       matrix:
         include:
           - platform: macos-latest
-            args: --target aarch64-apple-darwin
+            args: ""
             target_triple: aarch64-apple-darwin
-            bundle_dir: src-tauri/target/aarch64-apple-darwin/release/bundle/
+            bundle_dir: src-tauri/target/release/bundle/
             artifact_label: macos-arm64
             python: "3.11"
-          - platform: macos-latest
-            args: --target x86_64-apple-darwin
+          - platform: macos-13
+            args: ""
             target_triple: x86_64-apple-darwin
-            bundle_dir: src-tauri/target/x86_64-apple-darwin/release/bundle/
+            bundle_dir: src-tauri/target/release/bundle/
             artifact_label: macos-x64
             python: "3.11"
           - platform: ubuntu-22.04
@@ -58,8 +58,6 @@ jobs:
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
 
       - name: Install Linux dependencies
         if: matrix.platform == 'ubuntu-22.04'
@@ -93,7 +91,7 @@ jobs:
           [IO.File]::WriteAllBytes("$env:RUNNER_TEMP\codesign.pfx", $bytes)
 
       - name: Import macOS code signing certificate
-        if: matrix.platform == 'macos-latest'
+        if: startsWith(matrix.platform, 'macos')
         env:
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
