@@ -36,14 +36,18 @@ export default defineConfig({
     sourcemap: !!process.env.TAURI_DEBUG,
     rollupOptions: {
       output: {
+        // Hash-only filenames so unpackers cannot read component/library names from assets/.
+        entryFileNames: "assets/[hash].js",
+        chunkFileNames: "assets/[hash].js",
+        assetFileNames: "assets/[hash][extname]",
         manualChunks(id) {
           if (!id.includes("node_modules")) return;
-          if (id.includes("react-dom") || id.includes("/react/")) return "vendor-react";
-          if (id.includes("motion")) return "vendor-motion";
-          if (id.includes("react-markdown")) return "vendor-markdown";
-          if (id.includes("@radix-ui")) return "vendor-radix";
-          if (id.includes("lucide-react") || id.includes("@heroicons")) return "vendor-icons";
-          if (id.includes("shiki")) return "vendor-shiki";
+          if (id.includes("react-dom") || id.includes("/react/")) return "0";
+          if (id.includes("motion")) return "1";
+          if (id.includes("react-markdown") || id.includes("remark-")) return "2";
+          if (id.includes("@radix-ui")) return "3";
+          if (id.includes("lucide-react") || id.includes("@heroicons")) return "4";
+          if (id.includes("shiki")) return "5";
         },
       },
     },
