@@ -2,6 +2,8 @@
 //! Ensures child processes spawned by Nxtrive are torn down when the app exits.
 
 use std::process::Command;
+
+#[cfg(windows)]
 use std::sync::{Arc, Mutex};
 
 #[cfg(windows)]
@@ -28,7 +30,7 @@ impl ProcessSupervisor {
 
         #[cfg(not(windows))]
         {
-            Self
+            Self {}
         }
     }
 
