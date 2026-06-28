@@ -26,7 +26,7 @@ jobs:
             artifact_label: macos-arm64
             python: "3.12"
           - platform: ubuntu-22.04
-            args: ""
+            args: --bundles deb,rpm,appimage
             target_triple: x86_64-unknown-linux-gnu
             bundle_dir: src-tauri/target/release/bundle/
             artifact_label: linux-x64
@@ -69,8 +69,12 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev libssl-dev \
-            libayatana-appindicator3-dev librsvg2-dev patchelf libfuse2 \
-            file libglib2.0-dev
+            libayatana-appindicator3-dev librsvg2-dev patchelf libfuse2 fuse3 \
+            squashfs-tools zsync file libglib2.0-dev libgdk-pixbuf2.0-dev binutils
+
+      - name: Prepare AppImage tooling
+        if: matrix.platform == 'ubuntu-22.04'
+        run: bash scripts/patch-linuxdeploy.sh
 
       - name: Build Python backend (Unix)
         if: matrix.platform != 'windows-latest'
@@ -90,6 +94,8 @@ jobs:
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          APPIMAGE_EXTRACT_AND_RUN: "1"
+          NO_STRIP: "true"
         with:
           projectPath: .
           tagName: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || '' }}
