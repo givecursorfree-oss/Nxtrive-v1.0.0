@@ -10,6 +10,7 @@ backend/**/__pycache__/
 dist/
 src-tauri/target/
 src-tauri/sidecar/privatemind-backend/
+src-tauri/sidecar/privatemind-backend.exe
 src-tauri/sidecar/nxtrive-backend/
 src-tauri/binaries/
 src-tauri/gen/
