@@ -8,10 +8,15 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: nxtrive-release-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build:
     strategy:
       fail-fast: false
+      max-parallel: 4
       matrix:
         include:
           - platform: macos-latest
@@ -19,35 +24,26 @@ jobs:
             target_triple: aarch64-apple-darwin
             bundle_dir: src-tauri/target/release/bundle/
             artifact_label: macos-arm64
-            python: "3.11"
-          - platform: macos-13
-            args: ""
-            target_triple: x86_64-apple-darwin
-            bundle_dir: src-tauri/target/release/bundle/
-            artifact_label: macos-x64
-            python: "3.11"
+            python: "3.12"
           - platform: ubuntu-22.04
             args: ""
             target_triple: x86_64-unknown-linux-gnu
             bundle_dir: src-tauri/target/release/bundle/
             artifact_label: linux-x64
-            python: "3.11"
+            python: "3.12"
           - platform: windows-latest
             args: ""
             target_triple: x86_64-pc-windows-msvc
             bundle_dir: src-tauri/target/release/bundle/
             artifact_label: windows-x64
-            python: "3.11"
+            python: "3.12"
 
     runs-on: ${{ matrix.platform }}
     timeout-minutes: 90
 
     env:
-      # GitHub runners have no FUSE — required for linuxdeploy AppImages
       APPIMAGE_EXTRACT_AND_RUN: "1"
-      # Avoid linuxdeploy strip failures on modern ELF (.relr.dyn) in CI
       NO_STRIP: "true"
-      # Skip unsigned macOS codesign in CI (set secrets + signingIdentity to sign)
       APPLE_SIGNING_IDENTITY: "-"
 
     steps:
@@ -61,7 +57,7 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
           cache-dependency-path: package-lock.json
 
@@ -101,12 +97,12 @@ jobs:
           releaseBody: |
             ## Nxtrive ${{ github.ref_name }}
 
-            100% offline AI document chat for Windows, macOS, and Linux.
+            100% offline AI document chat for Windows, macOS (Apple Silicon), and Linux.
 
             | Platform | Installers |
             |----------|------------|
             | Windows | `.msi`, `.exe` (NSIS) |
-            | macOS | `.dmg` (Apple Silicon + Intel builds) |
+            | macOS | `.dmg` (Apple Silicon) |
             | Linux | `.deb`, `.rpm`, `.AppImage` |
           releaseDraft: true
           prerelease: false
