@@ -26,7 +26,7 @@ jobs:
             artifact_label: macos-arm64
             python: "3.12"
           - platform: ubuntu-22.04
-            args: --bundles deb,rpm,appimage
+            args: --bundles deb,rpm
             target_triple: x86_64-unknown-linux-gnu
             bundle_dir: src-tauri/target/release/bundle/
             artifact_label: linux-x64
@@ -73,10 +73,6 @@ jobs:
             squashfs-tools zsync file libglib2.0-dev libgdk-pixbuf2.0-dev binutils \
             desktop-file-utils
 
-      - name: Prepare AppImage tooling
-        if: matrix.platform == 'ubuntu-22.04'
-        run: bash scripts/patch-linuxdeploy.sh
-
       - name: Build Python backend (Unix)
         if: matrix.platform != 'windows-latest'
         env:
@@ -110,7 +106,7 @@ jobs:
             |----------|------------|
             | Windows | `.msi`, `.exe` (NSIS) |
             | macOS | `.dmg` (Apple Silicon) |
-            | Linux | `.deb`, `.rpm`, `.AppImage` |
+            | Linux | `.deb`, `.rpm` |
           releaseDraft: true
           prerelease: false
           args: ${{ matrix.args }}
