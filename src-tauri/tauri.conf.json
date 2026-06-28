@@ -51,7 +51,7 @@
     "macOS": {
       "minimumSystemVersion": "10.15",
       "entitlements": "entitlements.plist",
-      "signingIdentity": null
+      "signingIdentity": "-"
     },
     "linux": {
       "deb": {
@@ -61,7 +61,7 @@
         "depends": ["webkit2gtk4.1"]
       },
       "appimage": {
-        "bundleMediaFramework": true
+        "bundleMediaFramework": false
       }
     }
   }
