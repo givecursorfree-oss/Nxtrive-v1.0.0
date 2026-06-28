@@ -1,0 +1,60 @@
+name: Quality
+
+on:
+  pull_request:
+    paths:
+      - "src/**"
+      - "package.json"
+      - "package-lock.json"
+      - "playwright.config.ts"
+      - "tests/**"
+      - ".github/workflows/quality.yml"
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+
+jobs:
+  react-doctor:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install frontend deps
+        run: npm ci --ignore-scripts
+
+      - name: React Doctor scan
+        run: npx react-doctor@latest --verbose --scope changed
+
+      - name: React Doctor score (informational)
+        continue-on-error: true
+        run: |
+          SCORE=$(npx react-doctor@latest --score 2>/dev/null || echo "unavailable")
+          echo "React Doctor score: $SCORE"
+
+  backend-security:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install backend deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt pytest
+
+      - name: Security tests (ingest path validation)
+        run: pytest tests/test_security.py -q
