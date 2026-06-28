@@ -5,6 +5,9 @@ on:
     tags: ["v*"]
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   build:
     strategy:
@@ -13,20 +16,28 @@ jobs:
         include:
           - platform: macos-latest
             args: --target aarch64-apple-darwin
-            python: "3.11"
+            target_triple: aarch64-apple-darwin
+            bundle_dir: src-tauri/target/aarch64-apple-darwin/release/bundle/
             artifact_label: macos-arm64
+            python: "3.11"
           - platform: macos-latest
             args: --target x86_64-apple-darwin
-            python: "3.11"
+            target_triple: x86_64-apple-darwin
+            bundle_dir: src-tauri/target/x86_64-apple-darwin/release/bundle/
             artifact_label: macos-x64
+            python: "3.11"
           - platform: ubuntu-22.04
             args: ""
-            python: "3.11"
+            target_triple: x86_64-unknown-linux-gnu
+            bundle_dir: src-tauri/target/release/bundle/
             artifact_label: linux-x64
+            python: "3.11"
           - platform: windows-latest
             args: ""
-            python: "3.11"
+            target_triple: x86_64-pc-windows-msvc
+            bundle_dir: src-tauri/target/release/bundle/
             artifact_label: windows-x64
+            python: "3.11"
 
     runs-on: ${{ matrix.platform }}
 
@@ -59,6 +70,8 @@ jobs:
 
       - name: Build Python backend (Unix)
         if: matrix.platform != 'windows-latest'
+        env:
+          BACKEND_TARGET_TRIPLE: ${{ matrix.target_triple }}
         run: bash scripts/build-backend.sh
 
       - name: Build Python backend (Windows)
@@ -107,7 +120,7 @@ jobs:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         with:
           projectPath: .
-          tagName: ${{ github.ref_name }}
+          tagName: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || '' }}
           releaseName: Nxtrive ${{ github.ref_name }}
           releaseBody: |
             ## Nxtrive ${{ github.ref_name }}
@@ -127,5 +140,6 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: nxtrive-${{ matrix.artifact_label }}
-          path: src-tauri/target/release/bundle/
+          path: ${{ matrix.bundle_dir }}
+          if-no-files-found: error
           retention-days: 30

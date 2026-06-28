@@ -3,7 +3,22 @@ set -euo pipefail
 
 cd "$(dirname "$0")/../backend"
 
-python3 -m venv .venv
+if [[ "$(uname -s)" == "Darwin" ]]; then
+  DEFAULT_TRIPLE="$(rustc -vV | sed -n 's/^host: //p')"
+else
+  DEFAULT_TRIPLE="x86_64-unknown-linux-gnu"
+fi
+
+TRIPLE="${BACKEND_TARGET_TRIPLE:-$DEFAULT_TRIPLE}"
+
+ARCH_PREFIX=()
+if [[ "$(uname -s)" == "Darwin" && "$TRIPLE" == "x86_64-apple-darwin" && "$(uname -m)" == "arm64" ]]; then
+  ARCH_PREFIX=(arch -x86_64)
+  echo "Building x86_64 backend via Rosetta (host is arm64)..."
+fi
+
+"${ARCH_PREFIX[@]}" python3 -m venv .venv
+# shellcheck disable=SC1091
 source .venv/bin/activate
 pip install --upgrade pip
 pip install -r requirements.txt
@@ -13,25 +28,23 @@ SIDEcar_ROOT="$(cd .. && pwd)/src-tauri/sidecar"
 DIST_FOLDER="$SIDEcar_ROOT/nxtrive-backend"
 DEST_DIR="$(cd .. && pwd)/src-tauri/binaries"
 
-pyinstaller build_backend.spec --clean --noconfirm --distpath "$SIDEcar_ROOT" --workpath ./build/pyinstaller
+"${ARCH_PREFIX[@]}" pyinstaller build_backend.spec --clean --noconfirm --distpath "$SIDEcar_ROOT" --workpath ./build/pyinstaller
 
-if [[ "$(uname -s)" == "Darwin" ]]; then
-  TRIPLE="$(rustc -vV | sed -n 's/^host: //p')"
-  SOURCE_EXE="$DIST_FOLDER/nxtrive-backend"
-  DEST_EXE="$DEST_DIR/nxtrive-backend-$TRIPLE"
-else
-  TRIPLE="x86_64-unknown-linux-gnu"
-  SOURCE_EXE="$DIST_FOLDER/nxtrive-backend"
-  DEST_EXE="$DEST_DIR/nxtrive-backend-$TRIPLE"
-fi
-
+SOURCE_EXE="$DIST_FOLDER/nxtrive-backend"
+DEST_EXE="$DEST_DIR/nxtrive-backend-$TRIPLE"
 SOURCE_INTERNAL="$DIST_FOLDER/_internal"
 DEST_INTERNAL="$DEST_DIR/_internal"
+
+if [[ ! -f "$SOURCE_EXE" ]]; then
+  echo "Expected backend executable at $SOURCE_EXE" >&2
+  exit 1
+fi
 
 mkdir -p "$DEST_DIR"
 rm -rf "$DEST_INTERNAL"
 cp -R "$SOURCE_INTERNAL" "$DEST_INTERNAL"
 cp "$SOURCE_EXE" "$DEST_EXE"
 
-echo "✅ Backend built → $DEST_DIR"
-echo "   Entrypoint: $DEST_EXE"
+echo "Backend built for $TRIPLE"
+echo "  Entrypoint: $DEST_EXE"
+echo "  Support:    $DEST_INTERNAL"
