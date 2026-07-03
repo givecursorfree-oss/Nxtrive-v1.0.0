@@ -20,10 +20,10 @@ export type SetupPhase =
   | "download-models"
   | "ready";
 
-const POLL_MS = 4000;
-const BACKEND_POLL_MS = 600;
-const RESUME_DEBOUNCE_MS = 200;
-const RESTART_EVERY_ATTEMPTS = 20;
+const POLL_MS = 5000;
+const BACKEND_POLL_MS = 4000;
+const RESUME_DEBOUNCE_MS = 400;
+const RESTART_EVERY_ATTEMPTS = 12;
 
 function resolvePhase(backendOnline: boolean, status: OllamaStatus | null): SetupPhase {
   if (!backendOnline) return "backend-offline";
@@ -35,7 +35,7 @@ function resolvePhase(backendOnline: boolean, status: OllamaStatus | null): Setu
 }
 
 function formatBackendError(err: unknown, attempt: number): string | null {
-  if (attempt < 12) return null;
+  if (attempt < 8) return null;
 
   const message = err instanceof Error ? err.message : `Cannot reach ${BRAND_NAME} service`;
   if (
@@ -61,6 +61,7 @@ export function useSetupGate() {
 
   const attemptRef = useRef(0);
   const bootstrappedRef = useRef(false);
+  const checkInFlightRef = useRef(false);
 
   useEffect(() => {
     if (!isTauriApp() || bootstrappedRef.current) return;
@@ -68,14 +69,19 @@ export function useSetupGate() {
     bootstrapBackend();
   }, []);
 
-  const runCheck = useCallback(async (options?: { silent?: boolean }) => {
+  const runCheck = useCallback(async (options?: { silent?: boolean; bootstrap?: boolean }) => {
+    if (checkInFlightRef.current) return;
+    checkInFlightRef.current = true;
+
     if (!options?.silent) {
       setChecking(true);
     }
 
     let online = false;
     try {
-      if (phaseRef.current === "backend-offline" || attemptRef.current > 0) {
+      const isRetry = phaseRef.current === "backend-offline" || attemptRef.current > 0;
+
+      if (isRetry) {
         attemptRef.current += 1;
         setBackendAttempt(attemptRef.current);
 
@@ -84,23 +90,24 @@ export function useSetupGate() {
           attemptRef.current > 1 &&
           attemptRef.current % RESTART_EVERY_ATTEMPTS === 0
         ) {
+          resetApiBaseUrl();
           await restartBackend();
+          await sleep(1500);
         } else if (isTauriApp() && attemptRef.current === 1) {
           await ensureBackendStarted();
         }
 
-        resetApiBaseUrl();
-        await sleep(backendWarmupMs(attemptRef.current) + (attemptRef.current <= 3 ? 2000 : 0));
+        await sleep(backendWarmupMs(attemptRef.current));
       } else {
         attemptRef.current = 1;
         setBackendAttempt(1);
         if (isTauriApp()) {
           await ensureBackendStarted();
-          await sleep(backendWarmupMs(attemptRef.current) + (attemptRef.current <= 3 ? 2000 : 0));
+          await sleep(backendWarmupMs(1));
         }
       }
 
-      await fetchHealth();
+      await fetchHealth({ bootstrap: options?.bootstrap ?? attemptRef.current <= 2 });
       online = true;
       attemptRef.current = 0;
       setBackendAttempt(0);
@@ -113,6 +120,7 @@ export function useSetupGate() {
       setOllamaStatus(null);
       setPhase("backend-offline");
       setChecking(false);
+      checkInFlightRef.current = false;
       return;
     }
 
@@ -123,26 +131,30 @@ export function useSetupGate() {
       setBackendError(null);
     } catch (err) {
       const message = err instanceof Error ? err.message : "Failed to check Ollama";
-      setBackendError(message === "Failed to fetch" ? null : message);
+      setBackendError(message === "Failed to fetch" ? null : formatUserFacingError(message));
       setPhase("backend-offline");
     } finally {
       setChecking(false);
+      checkInFlightRef.current = false;
     }
   }, []);
 
   useEffect(() => {
-    void runCheck();
+    void runCheck({ bootstrap: true });
   }, [runCheck]);
 
   useEffect(() => {
+    if (phase === "ready") return;
+
     const interval =
-      phase === "backend-offline"
+      phase === "backend-offline" ||
+      phase === "start-ollama" ||
+      phase === "download-models"
         ? BACKEND_POLL_MS
-        : phase === "start-ollama" || phase === "download-models"
-          ? BACKEND_POLL_MS
-          : POLL_MS;
+        : POLL_MS;
+
     const timer = window.setInterval(() => {
-      void runCheck({ silent: phaseRef.current !== "backend-offline" });
+      void runCheck({ silent: true });
     }, interval);
 
     return () => window.clearInterval(timer);
@@ -150,18 +162,14 @@ export function useSetupGate() {
 
   useEffect(() => {
     let debounceTimer: number | undefined;
-    let inFlight = false;
 
     const scheduleResumeCheck = () => {
       if (document.visibilityState !== "visible") return;
+      if (phaseRef.current === "ready") return;
 
       window.clearTimeout(debounceTimer);
       debounceTimer = window.setTimeout(() => {
-        if (inFlight) return;
-        inFlight = true;
-        void runCheck({ silent: phaseRef.current === "ready" }).finally(() => {
-          inFlight = false;
-        });
+        void runCheck({ silent: true });
       }, RESUME_DEBOUNCE_MS);
     };
 

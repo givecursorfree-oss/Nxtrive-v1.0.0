@@ -2,16 +2,19 @@ import type { HealthResponse } from "./api";
 
 export const DEFAULT_BACKEND_PORT = 8742;
 
-const PORT_SCAN_RANGE = 80;
-const PROBE_TIMEOUT_MS = 1500;
-const TAURI_WAIT_MS = 180_000;
+const PORT_SCAN_RANGE = 8;
+const PROBE_TIMEOUT_MS = 800;
+const TAURI_QUICK_MS = 2_500;
+const TAURI_BOOTSTRAP_MS = 45_000;
 
 let cachedBaseUrl: string | null = null;
 let cachedPort: number | null = null;
+let discoveryInFlight: Promise<string> | null = null;
 
 export function resetApiBaseUrl(): void {
   cachedBaseUrl = null;
   cachedPort = null;
+  discoveryInFlight = null;
 }
 
 export function getCachedBackendPort(): number | null {
@@ -53,27 +56,25 @@ async function probeHealthAt(url: string): Promise<string | null> {
   }
 }
 
-async function probeBackendPort(): Promise<string | null> {
-  const preferred = cachedPort ?? DEFAULT_BACKEND_PORT;
-  const ports = new Set<number>();
+async function readTauriBackendPort(): Promise<number | null> {
+  if (!isTauriRuntime()) return null;
 
-  for (let offset = 0; offset < PORT_SCAN_RANGE; offset++) {
-    ports.add(preferred + offset);
-    if (offset > 0) ports.add(preferred - offset);
+  try {
+    const { invoke } = await import("@tauri-apps/api/core");
+    const port = await invoke<number | null>("peek_backend_port");
+    return typeof port === "number" && port > 0 ? port : null;
+  } catch {
+    return null;
   }
-
-  for (const port of ports) {
-    if (port <= 0 || port > 65535) continue;
-    const hit = await probeHealthAt(`http://127.0.0.1:${port}`);
-    if (hit) return hit;
-  }
-
-  return null;
 }
 
-async function readTauriBackendUrl(timeoutMs = TAURI_WAIT_MS): Promise<string | null> {
-  if (!isTauriRuntime()) {
-    return null;
+async function readTauriBackendUrl(timeoutMs: number): Promise<string | null> {
+  if (!isTauriRuntime()) return null;
+
+  const knownPort = await readTauriBackendPort();
+  if (knownPort) {
+    const quickHit = await probeHealthAt(`http://127.0.0.1:${knownPort}`);
+    if (quickHit) return quickHit;
   }
 
   try {
@@ -85,33 +86,62 @@ async function readTauriBackendUrl(timeoutMs = TAURI_WAIT_MS): Promise<string | 
   }
 }
 
-export async function getApiBaseUrl(): Promise<string> {
+async function probeBackendPort(): Promise<string | null> {
+  const tauriPort = await readTauriBackendPort();
+  const preferred = tauriPort ?? cachedPort ?? DEFAULT_BACKEND_PORT;
+  const ports: number[] = [];
+
+  for (let offset = 0; offset < PORT_SCAN_RANGE; offset++) {
+    ports.push(preferred + offset);
+    if (offset > 0) ports.push(preferred - offset);
+  }
+
+  for (const port of ports) {
+    if (port <= 0 || port > 65535) continue;
+    const hit = await probeHealthAt(`http://127.0.0.1:${port}`);
+    if (hit) return hit;
+  }
+
+  return null;
+}
+
+async function discoverApiBaseUrl(options?: { bootstrap?: boolean }): Promise<string> {
   if (cachedBaseUrl) {
     const stillHealthy = await probeHealthAt(cachedBaseUrl);
     if (stillHealthy) return stillHealthy;
     resetApiBaseUrl();
   }
 
+  const tauriTimeout = options?.bootstrap ? TAURI_BOOTSTRAP_MS : TAURI_QUICK_MS;
+
   if (isTauriRuntime()) {
-    const fromTauri = await readTauriBackendUrl();
+    const fromTauri = await readTauriBackendUrl(tauriTimeout);
     if (fromTauri) return fromTauri;
   }
 
   const discovered = await probeBackendPort();
   if (discovered) return discovered;
 
-  if (isTauriRuntime()) {
-    const retryFromTauri = await readTauriBackendUrl();
-    if (retryFromTauri) return retryFromTauri;
-  }
-
-  const retry = await probeBackendPort();
-  if (retry) return retry;
-
   throw new Error("Local backend is still starting");
 }
 
-export async function apiUrl(path: string): Promise<string> {
-  const base = await getApiBaseUrl();
+export async function getApiBaseUrl(options?: { bootstrap?: boolean }): Promise<string> {
+  if (cachedBaseUrl) {
+    const stillHealthy = await probeHealthAt(cachedBaseUrl);
+    if (stillHealthy) return stillHealthy;
+    resetApiBaseUrl();
+  }
+
+  if (!discoveryInFlight) {
+    discoveryInFlight = discoverApiBaseUrl(options).finally(() => {
+      discoveryInFlight = null;
+    });
+  }
+
+  return discoveryInFlight;
+}
+
+export async function apiUrl(path: string, options?: { bootstrap?: boolean }): Promise<string> {
+  const base = await getApiBaseUrl(options);
   return `${base}${path.startsWith("/") ? path : `/${path}`}`;
 }

@@ -79,8 +79,8 @@ async function parseError(response: Response): Promise<string> {
   }
 }
 
-export async function fetchHealth(): Promise<HealthResponse> {
-  const response = await fetch(await apiUrl("/health"));
+export async function fetchHealth(options?: { bootstrap?: boolean }): Promise<HealthResponse> {
+  const response = await fetch(await apiUrl("/health", options));
   if (!response.ok) {
     throw new Error(await parseError(response));
   }

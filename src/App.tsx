@@ -83,7 +83,9 @@ export default function App() {
     onRecheck: () => void setup.recheck(),
   });
 
-  const { online, retrying, retry } = useBackendHealth();
+  const setupComplete = setup.phase === "ready";
+
+  const { online, retrying, retry } = useBackendHealth(setupComplete);
 
   useKeyboardShortcuts();
 
@@ -119,8 +121,6 @@ export default function App() {
       setShowOnboarding(true);
     }
   }, [setup.phase, showWelcome]);
-
-  const setupComplete = setup.phase === "ready";
 
   const showPostWelcomeContent = postWelcome || !showWelcome;
 

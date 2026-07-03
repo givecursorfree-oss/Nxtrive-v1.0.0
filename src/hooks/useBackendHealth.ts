@@ -1,13 +1,18 @@
 import { useEffect, useState } from "react";
 import { fetchHealth } from "../lib/api";
 
-const POLL_INTERVAL_MS = 8000;
+const POLL_INTERVAL_MS = 12000;
 
-export function useBackendHealth() {
-  const [online, setOnline] = useState<boolean | null>(null);
+export function useBackendHealth(enabled = true) {
+  const [online, setOnline] = useState<boolean | null>(enabled ? null : false);
   const [retrying, setRetrying] = useState(false);
 
   const check = async () => {
+    if (!enabled) {
+      setOnline(false);
+      return false;
+    }
+
     try {
       const health = await fetchHealth();
       setOnline(health.status === "ok");
@@ -21,6 +26,11 @@ export function useBackendHealth() {
   };
 
   useEffect(() => {
+    if (!enabled) {
+      setOnline(false);
+      return;
+    }
+
     let active = true;
     let timer: number | undefined;
 
@@ -36,12 +46,13 @@ export function useBackendHealth() {
       active = false;
       if (timer) window.clearInterval(timer);
     };
-  }, []);
+  }, [enabled]);
 
   const retry = () => {
+    if (!enabled) return;
     setRetrying(true);
     void check();
   };
 
-  return { online, retrying, retry, loading: online === null };
+  return { online, retrying, retry, loading: enabled && online === null };
 }

@@ -724,11 +724,18 @@ impl BackendHandle {
     }
 
     fn spawn_release_sidecar(&self) -> Result<(tauri::async_runtime::Receiver<CommandEvent>, CommandChild), String> {
+        let resource_dir = self
+            .app
+            .path()
+            .resource_dir()
+            .map_err(|error| format!("Failed to resolve resource directory: {error}"))?;
+
         self.app
             .shell()
             .sidecar("nxtrive-backend")
             .map_err(|error| format!("Failed to resolve sidecar binary: {error}"))?
             .env("NXTRIVE_DATA_DIR", &self.data_dir)
+            .current_dir(resource_dir)
             .spawn()
             .map_err(|error| format!("Failed to spawn backend sidecar: {error}"))
     }
@@ -826,6 +833,23 @@ fn restart_backend(backend: tauri::State<BackendHandle>) -> Result<(), String> {
 }
 
 #[tauri::command]
+fn peek_backend_port(app: tauri::AppHandle) -> Result<Option<u16>, String> {
+    let data_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|error| error.to_string())?;
+    let port_file = data_dir.join("backend.port");
+
+    match std::fs::read_to_string(&port_file) {
+        Ok(content) => match content.trim().parse::<u16>() {
+            Ok(port) if port > 0 => Ok(Some(port)),
+            _ => Ok(None),
+        },
+        Err(_) => Ok(None),
+    }
+}
+
+#[tauri::command]
 fn get_backend_url(app: tauri::AppHandle, timeout_ms: Option<u64>) -> Result<String, String> {
     let data_dir = app
         .path()
@@ -882,6 +906,7 @@ fn main() {
             terminal_download_session_finished,
             spawn_ollama_install_terminal,
             restart_backend,
+            peek_backend_port,
             get_backend_url,
             ensure_backend_started,
             shutdown_app

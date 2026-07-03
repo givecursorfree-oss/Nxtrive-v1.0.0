@@ -79,9 +79,9 @@ export function sleep(ms: number): Promise<void> {
 
 
 export function backendWarmupMs(attempt: number): number {
-  if (attempt <= 1) return 1200;
-  if (attempt <= 4) return 800;
-  return Math.min(1200 + attempt * 300, 8000);
+  if (attempt <= 1) return 1500;
+  if (attempt <= 4) return 1000;
+  return Math.min(1000 + attempt * 250, 6000);
 }
 
 
