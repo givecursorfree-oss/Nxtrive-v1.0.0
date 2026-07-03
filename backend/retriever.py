@@ -5,10 +5,9 @@ from __future__ import annotations
 import logging
 from typing import Generator, List, Literal
 
-import chromadb
 import ollama
 
-from config import CHROMA_PATH, COLLECTION_PREFIX, EMBED_MODEL, LLM_MODEL, TOP_K
+from config import CHROMA_PATH, COLLECTION_PREFIX, EMBED_MODEL, LLM_MODEL, TOP_K, create_chroma_client
 from errors import format_ollama_error
 from ingestor import DocumentIngestor
 
@@ -92,7 +91,7 @@ class DocumentRetriever:
     """Retrieve relevant chunks and stream answers from the local LLM."""
 
     def __init__(self) -> None:
-        self.client = chromadb.PersistentClient(path=str(CHROMA_PATH))
+        self.client = create_chroma_client()
         self.ingestor = DocumentIngestor()
 
     def stream_answer(

@@ -41,6 +41,7 @@ from security import (
     validate_root_name,
 )
 from errors import format_ollama_error
+from privacy import sanitize_error_message
 from ingestor import DocumentIngestor
 from models import (
     ChatRequest,
@@ -106,7 +107,7 @@ async def lifespan(_: FastAPI) -> AsyncGenerator[None, None]:
 
     port = get_backend_port()
     logger.info("Nxtrive backend listening on %s (port %s)", platform.system(), port)
-    logger.info("Data directory: %s", get_data_dir())
+    logger.info("Local data store initialized")
 
     async def poll_ollama_status() -> None:
         while True:
@@ -154,7 +155,6 @@ def health() -> HealthResponse:
         status="ok",
         models=cached["models"] if cached else [],
         platform=platform.system(),
-        data_dir=str(get_data_dir()),
         port=get_backend_port(),
     )
 
@@ -162,7 +162,9 @@ def health() -> HealthResponse:
 @app.get("/ollama-status", response_model=OllamaStatusResponse)
 def ollama_status() -> OllamaStatusResponse:
     status = refresh_ollama_cache()
-    return OllamaStatusResponse(**status)
+    safe_status = {**status, "error": sanitize_error_message(status.get("error"))}
+    safe_status.pop("binary_path", None)
+    return OllamaStatusResponse(**safe_status)
 
 
 @app.post("/ollama/pull")

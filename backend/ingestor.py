@@ -8,7 +8,6 @@ import shutil
 from pathlib import Path
 from typing import Generator, List, Set
 
-import chromadb
 import chardet
 import ollama
 from chromadb.api.models.Collection import Collection
@@ -27,6 +26,7 @@ from config import (
     SUPPORTED_DOC_EXTENSIONS,
     SUPPORTED_EXTENSIONS,
     SUPPORTED_TEXT_EXTENSIONS,
+    create_chroma_client,
     is_windows,
 )
 from security import MAX_INGEST_FILES_PER_FOLDER
@@ -38,7 +38,7 @@ class DocumentIngestor:
     """Ingest documents from a folder into a ChromaDB collection."""
 
     def __init__(self) -> None:
-        self.client = chromadb.PersistentClient(path=str(CHROMA_PATH))
+        self.client = create_chroma_client()
         self.splitter = RecursiveCharacterSplitter()
 
     def ingest_folder(self, folder_path: str, collection_name: str) -> Generator[dict, None, None]:

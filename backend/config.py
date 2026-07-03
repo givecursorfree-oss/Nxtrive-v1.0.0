@@ -11,6 +11,8 @@ from platformdirs import user_data_dir
 
 import socket
 
+os.environ.setdefault("ANONYMIZED_TELEMETRY", "False")
+
 APP_NAME = "Nxtrive"
 LEGACY_APP_NAME = "PrivateMind"
 
@@ -119,6 +121,17 @@ def ensure_directories() -> None:
 
 def is_windows() -> bool:
     return sys.platform == "win32"
+
+
+def create_chroma_client():
+    """Local Chroma client with telemetry disabled."""
+    import chromadb
+    from chromadb.config import Settings
+
+    return chromadb.PersistentClient(
+        path=str(CHROMA_PATH),
+        settings=Settings(anonymized_telemetry=False),
+    )
 
 
 def setup_logging() -> None:

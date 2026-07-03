@@ -19,13 +19,8 @@ async function isTerminalSessionFinished(sessionId: string): Promise<boolean> {
   }
 }
 
-async function resolveOllamaBinary(): Promise<string | null> {
-  try {
-    const status = await fetchOllamaStatus();
-    return status.binary_path;
-  } catch {
-    return null;
-  }
+async function resolveOllamaBinary(): Promise<string | undefined> {
+  return undefined;
 }
 
 /** Open the system terminal and run `ollama pull` (Windows / macOS / Linux). */
@@ -46,10 +41,9 @@ export async function downloadModelsViaTerminal(
 
   try {
     const { invoke } = await import("@tauri-apps/api/core");
-    const binaryPath = await resolveOllamaBinary();
     const sessionId = await invoke<string>("spawn_ollama_pull_terminal", {
       models,
-      binaryPath: binaryPath ?? undefined,
+      binaryPath: await resolveOllamaBinary(),
     });
     if (!sessionId) return true;
 
@@ -150,10 +144,9 @@ export async function spawnTerminalModelPull(models: string[]): Promise<void> {
   }
 
   const { invoke } = await import("@tauri-apps/api/core");
-  const binaryPath = await resolveOllamaBinary();
   await invoke<string>("spawn_ollama_pull_terminal", {
     models,
-    binaryPath,
+    binaryPath: await resolveOllamaBinary(),
   });
 }
 

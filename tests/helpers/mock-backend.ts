@@ -7,7 +7,6 @@ export function mockHealthReady(port = DEFAULT_PORT) {
     status: "ok" as const,
     models: ["llama3", "nomic-embed-text"],
     platform: "Windows",
-    data_dir: "C:\\test\\data",
     port,
   };
 }
@@ -22,7 +21,6 @@ export function mockOllamaReady() {
     ready: true,
     install_url: "https://ollama.com/download/windows",
     platform: "Windows",
-    binary_path: "C:\\Ollama\\ollama.exe",
     error: null,
   };
 }

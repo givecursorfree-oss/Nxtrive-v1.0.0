@@ -3,6 +3,7 @@ name: Build Nxtrive
 on:
   push:
     tags: ["v*"]
+    branches: [main]
   workflow_dispatch:
 
 permissions:

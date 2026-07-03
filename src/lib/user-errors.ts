@@ -10,11 +10,20 @@ const OLLAMA_CONNECTION_PATTERNS = [/failed to fetch/i, /connection refused/i, /
 
 const OLLAMA_MODEL_PATTERNS = [/model.*not found/i, /does not exist/i];
 
+const WINDOWS_USER_PATH = /[A-Za-z]:\\Users\\[^\\]+/g;
+const UNIX_USER_PATH = /\/(?:Users|home)\/[^/]+/g;
+
+function redactUserPaths(message: string): string {
+  return message
+    .replace(WINDOWS_USER_PATH, "~")
+    .replace(UNIX_USER_PATH, "~");
+}
+
 export function formatUserFacingError(error: unknown): string {
   const message =
     error instanceof Error ? error.message : typeof error === "string" ? error : "Something went wrong.";
 
-  const trimmed = message.trim();
+  const trimmed = redactUserPaths(message.trim());
   if (!trimmed) return "Something went wrong. Try again in a moment.";
 
   if (OLLAMA_MEMORY_PATTERNS.some((pattern) => pattern.test(trimmed))) {

@@ -10,6 +10,7 @@ import {
 import { resetApiBaseUrl } from "../lib/api-base";
 import { BRAND_NAME } from "../lib/brand";
 import { isTauriApp } from "../lib/ollama-download";
+import { formatUserFacingError } from "../lib/user-errors";
 
 export type SetupPhase =
   | "checking"
@@ -44,7 +45,7 @@ function formatBackendError(err: unknown, attempt: number): string | null {
   ) {
     return "Starting the local service…";
   }
-  return message;
+  return formatUserFacingError(message);
 }
 
 export function useSetupGate() {
@@ -89,13 +90,13 @@ export function useSetupGate() {
         }
 
         resetApiBaseUrl();
-        await sleep(backendWarmupMs(attemptRef.current));
+        await sleep(backendWarmupMs(attemptRef.current) + (attemptRef.current <= 3 ? 2000 : 0));
       } else {
         attemptRef.current = 1;
         setBackendAttempt(1);
         if (isTauriApp()) {
           await ensureBackendStarted();
-          await sleep(backendWarmupMs(1));
+          await sleep(backendWarmupMs(attemptRef.current) + (attemptRef.current <= 3 ? 2000 : 0));
         }
       }
 

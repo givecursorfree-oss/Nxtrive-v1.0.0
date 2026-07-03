@@ -11,7 +11,6 @@ class HealthResponse(BaseModel):
     status: Literal["ok", "error"]
     models: List[str]
     platform: str
-    data_dir: str
     port: int
 
 
@@ -79,7 +78,6 @@ class OllamaStatusResponse(BaseModel):
     ready: bool
     install_url: str
     platform: str
-    binary_path: str | None = None
     error: str | None = None
 
 

@@ -10,8 +10,8 @@ test.describe("Backend API (integration)", () => {
     const body = await response.json();
     expect(body.status).toBe("ok");
     expect(body.platform).toBeTruthy();
-    expect(body.data_dir).toBeTruthy();
     expect(typeof body.port).toBe("number");
+    expect(body).not.toHaveProperty("data_dir");
   });
 
   test("GET /ollama-status returns structured status", async ({ request }) => {
@@ -24,6 +24,7 @@ test.describe("Backend API (integration)", () => {
     expect(typeof body.ready).toBe("boolean");
     expect(body.required_models).toContain("llama3");
     expect(body.required_models).toContain("nomic-embed-text");
+    expect(body).not.toHaveProperty("binary_path");
   });
 
   test("GET /collections returns collections array", async ({ request }) => {

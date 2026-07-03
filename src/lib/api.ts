@@ -17,7 +17,6 @@ export interface HealthResponse {
   status: "ok" | "error";
   models: string[];
   platform: string;
-  data_dir: string;
   port: number;
 }
 
@@ -30,7 +29,6 @@ export interface OllamaStatus {
   ready: boolean;
   install_url: string;
   platform: string;
-  binary_path: string | null;
   error: string | null;
 }
 

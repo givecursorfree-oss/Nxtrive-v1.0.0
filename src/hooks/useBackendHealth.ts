@@ -5,14 +5,12 @@ const POLL_INTERVAL_MS = 8000;
 
 export function useBackendHealth() {
   const [online, setOnline] = useState<boolean | null>(null);
-  const [dataDir, setDataDir] = useState<string | null>(null);
   const [retrying, setRetrying] = useState(false);
 
   const check = async () => {
     try {
       const health = await fetchHealth();
       setOnline(health.status === "ok");
-      setDataDir(health.data_dir);
       return true;
     } catch {
       setOnline(false);
@@ -45,5 +43,5 @@ export function useBackendHealth() {
     void check();
   };
 
-  return { online, dataDir, retrying, retry, loading: online === null };
+  return { online, retrying, retry, loading: online === null };
 }
