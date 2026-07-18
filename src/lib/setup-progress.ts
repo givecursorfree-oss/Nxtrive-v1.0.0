@@ -7,12 +7,12 @@ import { prerequisitesMet } from "@/lib/setup-prerequisites";
 export function buildStepFluxPhases(items: PrerequisiteItem[]): ProgressiveFluxPhase[] {
   if (items.length === 0) {
     return [
-      { at: 0, label: "starting setup" },
-      { at: 100, label: "complete" },
+      { at: 0, label: "Starting setup" },
+      { at: 100, label: "Complete" },
     ];
   }
 
-  const phases: ProgressiveFluxPhase[] = [{ at: 0, label: "starting setup" }];
+  const phases: ProgressiveFluxPhase[] = [{ at: 0, label: "Starting setup" }];
 
   items.forEach((item, index) => {
     const at = Math.round(((index + 1) / items.length) * 100);
@@ -20,12 +20,14 @@ export function buildStepFluxPhases(items: PrerequisiteItem[]): ProgressiveFluxP
       at: Math.max(1, at - Math.round(100 / items.length / 2)),
       label:
         item.status === "ready"
-          ? `${item.label} verified`
-          : `checking ${item.label.toLowerCase()}`,
+          ? `${item.label} ready`
+          : item.status === "working"
+            ? `Verifying ${item.label}`
+            : `Preparing ${item.label}`,
     });
   });
 
-  phases.push({ at: 100, label: "all set" });
+  phases.push({ at: 100, label: "All set" });
   return phases;
 }
 
@@ -98,7 +100,8 @@ export function computeSetupProgress(input: {
   }
 
   if (!backendOnline && readyCount === 0) {
-    const warmup = Math.min(12, Math.max(1, backendAttempt) * 0.9);
+    // Give visible motion while the local service cold-starts (imports, bind, health).
+    const warmup = Math.min(18, Math.max(3, backendAttempt) * 2.2);
     progress = Math.max(progress, warmup);
   }
 
@@ -111,6 +114,7 @@ export function setupProgressDetail(
   items: PrerequisiteItem[],
   activeIndex: number,
   checking: boolean,
+  elapsedSeconds = 0,
 ): string {
   if (progress >= 100) return "Everything is ready — opening your workspace.";
 
@@ -118,10 +122,13 @@ export function setupProgressDetail(
   const active = items[activeIndex];
 
   if (active?.status === "working" || pullingCaption(checking, active)) {
-    return `Step ${activeIndex + 1} of ${items.length}: checking ${active.label.toLowerCase()}…`;
+    return `Step ${activeIndex + 1} of ${items.length}: verifying ${active.label.toLowerCase()}…`;
   }
 
   if (phase === "backend-offline") {
+    if (elapsedSeconds >= 20) {
+      return `Step 1 of ${items.length}: still starting the local service (${elapsedSeconds}s)…`;
+    }
     return `Step 1 of ${items.length}: starting local app service…`;
   }
   if (phase === "install-ollama") {
@@ -145,4 +152,12 @@ function pullingCaption(
   active: PrerequisiteItem | undefined,
 ): boolean {
   return Boolean(checking && active && active.status === "waiting");
+}
+
+export function formatElapsed(seconds: number): string {
+  const safe = Math.max(0, Math.floor(seconds));
+  const mins = Math.floor(safe / 60);
+  const secs = safe % 60;
+  if (mins <= 0) return `${secs}s`;
+  return `${mins}m ${secs.toString().padStart(2, "0")}s`;
 }

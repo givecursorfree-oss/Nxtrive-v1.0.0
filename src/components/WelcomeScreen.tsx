@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { motion, useReducedMotion } from "motion/react";
 
 import { BrandLogoLockup } from "@/components/BrandLogo";
@@ -17,16 +17,30 @@ interface WelcomeScreenProps {
 export function WelcomeScreen({ onEnterStart, onEnterComplete }: WelcomeScreenProps) {
   const reduceMotion = useReducedMotion();
   const [exiting, setExiting] = useState(false);
+  const completedRef = useRef(false);
   const open = !exiting;
+
+  const finishEnter = useCallback(() => {
+    if (completedRef.current) return;
+    completedRef.current = true;
+    onEnterComplete();
+  }, [onEnterComplete]);
 
   const beginExit = useCallback(() => {
     if (exiting) return;
     setExiting(true);
     onEnterStart();
     if (reduceMotion) {
-      onEnterComplete();
+      finishEnter();
     }
-  }, [exiting, onEnterStart, onEnterComplete, reduceMotion]);
+  }, [exiting, onEnterStart, finishEnter, reduceMotion]);
+
+  useEffect(() => {
+    if (!exiting || reduceMotion) return;
+    // Fallback if motion completion never fires (stuck exit overlay).
+    const timer = window.setTimeout(finishEnter, EXIT_DURATION * 1000 + 250);
+    return () => window.clearTimeout(timer);
+  }, [exiting, reduceMotion, finishEnter]);
 
   useEffect(() => {
     const prev = document.body.style.overflow;
@@ -63,7 +77,7 @@ export function WelcomeScreen({ onEnterStart, onEnterComplete }: WelcomeScreenPr
       }
       transition={{ duration: EXIT_DURATION, ease: EASE }}
       onAnimationComplete={() => {
-        if (exiting && !reduceMotion) onEnterComplete();
+        if (exiting && !reduceMotion) finishEnter();
       }}
     >
       <GlowHorizonFM variant="top" />

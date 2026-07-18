@@ -20,10 +20,11 @@ export type SetupPhase =
   | "download-models"
   | "ready";
 
-const POLL_MS = 5000;
-const BACKEND_POLL_MS = 4000;
+const POLL_MS = 4000;
+const BACKEND_POLL_MS = 2500;
 const RESUME_DEBOUNCE_MS = 400;
-const RESTART_EVERY_ATTEMPTS = 12;
+const RESTART_EVERY_ATTEMPTS = 8;
+const SHOW_STATUS_AFTER_ATTEMPTS = 2;
 
 function resolvePhase(backendOnline: boolean, status: OllamaStatus | null): SetupPhase {
   if (!backendOnline) return "backend-offline";
@@ -35,7 +36,7 @@ function resolvePhase(backendOnline: boolean, status: OllamaStatus | null): Setu
 }
 
 function formatBackendError(err: unknown, attempt: number): string | null {
-  if (attempt < 8) return null;
+  if (attempt < SHOW_STATUS_AFTER_ATTEMPTS) return null;
 
   const message = err instanceof Error ? err.message : `Cannot reach ${BRAND_NAME} service`;
   if (
@@ -43,7 +44,9 @@ function formatBackendError(err: unknown, attempt: number): string | null {
     message.includes("fetch") ||
     message.includes("still starting")
   ) {
-    return "Starting the local service…";
+    return attempt >= 6
+      ? "The local service is taking longer than expected. You can retry or keep waiting."
+      : "Still starting the local service…";
   }
   return formatUserFacingError(message);
 }
@@ -55,6 +58,7 @@ export function useSetupGate() {
   const [checking, setChecking] = useState(true);
   const [backendError, setBackendError] = useState<string | null>(null);
   const [backendAttempt, setBackendAttempt] = useState(0);
+  const [startedAt] = useState(() => Date.now());
 
   const phaseRef = useRef(phase);
   phaseRef.current = phase;
@@ -62,6 +66,7 @@ export function useSetupGate() {
   const attemptRef = useRef(0);
   const bootstrappedRef = useRef(false);
   const checkInFlightRef = useRef(false);
+  const checkGenerationRef = useRef(0);
 
   useEffect(() => {
     if (!isTauriApp() || bootstrappedRef.current) return;
@@ -69,16 +74,24 @@ export function useSetupGate() {
     bootstrapBackend();
   }, []);
 
-  const runCheck = useCallback(async (options?: { silent?: boolean; bootstrap?: boolean }) => {
-    if (checkInFlightRef.current) return;
+  const runCheck = useCallback(async (options?: {
+    silent?: boolean;
+    bootstrap?: boolean;
+    force?: boolean;
+  }) => {
+    if (checkInFlightRef.current && !options?.force) return;
+    const generation = ++checkGenerationRef.current;
     checkInFlightRef.current = true;
 
     if (!options?.silent) {
       setChecking(true);
     }
 
-    let online = false;
+    const isCurrent = () => generation === checkGenerationRef.current;
+
     try {
+      let online = false;
+
       const isRetry = phaseRef.current === "backend-offline" || attemptRef.current > 0;
 
       if (isRetry) {
@@ -92,7 +105,7 @@ export function useSetupGate() {
         ) {
           resetApiBaseUrl();
           await restartBackend();
-          await sleep(1500);
+          await sleep(1200);
         } else if (isTauriApp() && attemptRef.current === 1) {
           await ensureBackendStarted();
         }
@@ -107,35 +120,48 @@ export function useSetupGate() {
         }
       }
 
-      await fetchHealth({ bootstrap: options?.bootstrap ?? attemptRef.current <= 2 });
-      online = true;
-      attemptRef.current = 0;
-      setBackendAttempt(0);
-      setBackendOnline(true);
-      setBackendError(null);
-    } catch (err) {
-      online = false;
-      setBackendOnline(false);
-      setBackendError(formatBackendError(err, attemptRef.current));
-      setOllamaStatus(null);
-      setPhase("backend-offline");
-      setChecking(false);
-      checkInFlightRef.current = false;
-      return;
-    }
+      if (!isCurrent()) return;
 
-    try {
-      const status = await fetchOllamaStatus();
-      setOllamaStatus(status);
-      setPhase(resolvePhase(online, status));
-      setBackendError(null);
-    } catch (err) {
-      const message = err instanceof Error ? err.message : "Failed to check Ollama";
-      setBackendError(message === "Failed to fetch" ? null : formatUserFacingError(message));
-      setPhase("backend-offline");
+      // Prefer short polls after the first couple of attempts so the UI can
+      // refresh status instead of appearing frozen on one long discovery.
+      const useBootstrap =
+        options?.bootstrap ?? (attemptRef.current <= 2 && phaseRef.current !== "backend-offline");
+
+      try {
+        await fetchHealth({ bootstrap: useBootstrap });
+        if (!isCurrent()) return;
+
+        online = true;
+        attemptRef.current = 0;
+        setBackendAttempt(0);
+        setBackendOnline(true);
+        setBackendError(null);
+      } catch (err) {
+        if (!isCurrent()) return;
+        setBackendOnline(false);
+        setBackendError(formatBackendError(err, attemptRef.current));
+        setOllamaStatus(null);
+        setPhase("backend-offline");
+        return;
+      }
+
+      try {
+        const status = await fetchOllamaStatus();
+        if (!isCurrent()) return;
+        setOllamaStatus(status);
+        setPhase(resolvePhase(online, status));
+        setBackendError(null);
+      } catch (err) {
+        if (!isCurrent()) return;
+        const message = err instanceof Error ? err.message : "Failed to check Ollama";
+        setBackendError(message === "Failed to fetch" ? null : formatUserFacingError(message));
+        setPhase("backend-offline");
+      }
     } finally {
-      setChecking(false);
-      checkInFlightRef.current = false;
+      if (isCurrent()) {
+        setChecking(false);
+        checkInFlightRef.current = false;
+      }
     }
   }, []);
 
@@ -154,7 +180,7 @@ export function useSetupGate() {
         : POLL_MS;
 
     const timer = window.setInterval(() => {
-      void runCheck({ silent: true });
+      void runCheck({ silent: true, bootstrap: false });
     }, interval);
 
     return () => window.clearInterval(timer);
@@ -169,7 +195,7 @@ export function useSetupGate() {
 
       window.clearTimeout(debounceTimer);
       debounceTimer = window.setTimeout(() => {
-        void runCheck({ silent: true });
+        void runCheck({ silent: true, bootstrap: false });
       }, RESUME_DEBOUNCE_MS);
     };
 
@@ -190,6 +216,10 @@ export function useSetupGate() {
     ollamaStatus,
     backendError,
     backendAttempt,
-    recheck: runCheck,
+    startedAt,
+    recheck: () => {
+      resetApiBaseUrl();
+      void runCheck({ force: true, bootstrap: true });
+    },
   };
 }

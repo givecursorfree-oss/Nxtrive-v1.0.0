@@ -145,6 +145,7 @@ export default function App() {
             ollamaStatus={setup.ollamaStatus}
             backendError={setup.backendError}
             backendAttempt={setup.backendAttempt}
+            startedAt={setup.startedAt}
             onRecheck={() => void setup.recheck()}
             installNotice={automation.installNotice}
             pulling={automation.pulling}

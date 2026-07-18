@@ -45,7 +45,7 @@ class DocumentIngestor:
         """Yield progress updates while ingesting a folder of documents."""
         root = Path(folder_path).expanduser().resolve()
         if not root.exists() or not root.is_dir():
-            raise FileNotFoundError(f"Folder not found: {root}")
+            raise FileNotFoundError("Folder not found")
 
         full_name = self._normalize_collection_name(collection_name)
         collection = self.client.get_or_create_collection(name=full_name)

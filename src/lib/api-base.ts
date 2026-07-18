@@ -4,8 +4,9 @@ export const DEFAULT_BACKEND_PORT = 8742;
 
 const PORT_SCAN_RANGE = 8;
 const PROBE_TIMEOUT_MS = 800;
-const TAURI_QUICK_MS = 2_500;
-const TAURI_BOOTSTRAP_MS = 45_000;
+const TAURI_QUICK_MS = 3_000;
+const TAURI_BOOTSTRAP_MS = 20_000;
+const POLL_INTERVAL_MS = 300;
 
 let cachedBaseUrl: string | null = null;
 let cachedPort: number | null = null;
@@ -39,6 +40,10 @@ function isTauriRuntime(): boolean {
   return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 }
 
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => window.setTimeout(resolve, ms));
+}
+
 async function probeHealthAt(url: string): Promise<string | null> {
   try {
     const response = await fetch(`${url}/health`, {
@@ -68,22 +73,37 @@ async function readTauriBackendPort(): Promise<number | null> {
   }
 }
 
-async function readTauriBackendUrl(timeoutMs: number): Promise<string | null> {
+/**
+ * Poll peek + /health until the backend is actually accepting requests.
+ * Avoids the old one-shot `get_backend_url` wait that could hang the UI
+ * and then fail the only health probe during the port-bound race.
+ */
+async function waitForTauriBackendHealthy(timeoutMs: number): Promise<string | null> {
   if (!isTauriRuntime()) return null;
 
-  const knownPort = await readTauriBackendPort();
-  if (knownPort) {
-    const quickHit = await probeHealthAt(`http://127.0.0.1:${knownPort}`);
-    if (quickHit) return quickHit;
+  const deadline = Date.now() + timeoutMs;
+
+  while (Date.now() < deadline) {
+    const knownPort = await readTauriBackendPort();
+    if (knownPort) {
+      cachedPort = knownPort;
+      const hit = await probeHealthAt(`http://127.0.0.1:${knownPort}`);
+      if (hit) return hit;
+    } else {
+      // Only scan nearby ports when no port file exists yet — avoids
+      // hammering 8× health probes every 300ms while cold-starting.
+      const scanned = await probeBackendPort();
+      if (scanned) return scanned;
+      await sleep(Math.min(POLL_INTERVAL_MS * 2, Math.max(0, deadline - Date.now())));
+      continue;
+    }
+
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) break;
+    await sleep(Math.min(POLL_INTERVAL_MS, remaining));
   }
 
-  try {
-    const { invoke } = await import("@tauri-apps/api/core");
-    const url = await invoke<string>("get_backend_url", { timeoutMs });
-    return probeHealthAt(url);
-  } catch {
-    return null;
-  }
+  return null;
 }
 
 async function probeBackendPort(): Promise<string | null> {
@@ -115,7 +135,7 @@ async function discoverApiBaseUrl(options?: { bootstrap?: boolean }): Promise<st
   const tauriTimeout = options?.bootstrap ? TAURI_BOOTSTRAP_MS : TAURI_QUICK_MS;
 
   if (isTauriRuntime()) {
-    const fromTauri = await readTauriBackendUrl(tauriTimeout);
+    const fromTauri = await waitForTauriBackendHealthy(tauriTimeout);
     if (fromTauri) return fromTauri;
   }
 

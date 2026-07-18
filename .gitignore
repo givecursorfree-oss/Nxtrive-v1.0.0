@@ -12,8 +12,12 @@ src-tauri/target/
 src-tauri/sidecar/privatemind-backend/
 src-tauri/sidecar/privatemind-backend.exe
 src-tauri/sidecar/nxtrive-backend/
+src-tauri/sidecar/nxtrive-backend.exe
 src-tauri/binaries/
 src-tauri/gen/
+
+# Local audit / extracted installer trees (never publish)
+.artifact-audit/
 
 # Data
 chroma_db/

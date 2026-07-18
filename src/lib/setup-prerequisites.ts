@@ -76,7 +76,7 @@ export function buildPrerequisites(
     items.push({
       id: "ollama",
       label: "Ollama",
-      detail: "Local AI runtime — checked once the app service is online",
+      detail: "Checked automatically once the app service is online",
       status: "waiting",
     });
     appendModelRoadmap(items, DEFAULT_REQUIRED_MODELS, null, options);

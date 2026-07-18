@@ -1,6 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use std::collections::HashMap;
+use std::net::TcpListener;
 use std::path::PathBuf;
 #[cfg(target_os = "windows")]
 use std::process::Child;
@@ -11,6 +12,42 @@ use std::time::{Duration, Instant};
 use tauri::{AppHandle, Manager, RunEvent, WindowEvent};
 use tauri_plugin_shell::process::{CommandChild, CommandEvent};
 use tauri_plugin_shell::ShellExt;
+
+const DEFAULT_BACKEND_PORT: u16 = 8742;
+const BACKEND_PORT_FILE: &str = "backend.port";
+const BACKEND_PORT_ENV: &str = "NXTRIVE_BACKEND_PORT";
+
+/// Reserve a local TCP port and publish it immediately so the UI can poll
+/// while Python finishes importing heavy dependencies.
+fn claim_backend_port(data_dir: &str) -> Result<u16, String> {
+    let start = std::env::var(BACKEND_PORT_ENV)
+        .ok()
+        .and_then(|value| value.parse::<u16>().ok())
+        .filter(|port| *port > 0)
+        .unwrap_or(DEFAULT_BACKEND_PORT);
+
+    let mut last_error = String::from("No available backend port found");
+    for port in start..start.saturating_add(50).max(start) {
+        match TcpListener::bind(("127.0.0.1", port)) {
+            Ok(listener) => {
+                // Drop the listener so the Python process can bind the same port.
+                drop(listener);
+                let port_file = PathBuf::from(data_dir).join(BACKEND_PORT_FILE);
+                std::fs::write(&port_file, port.to_string())
+                    .map_err(|error| format!("Failed to write backend port file: {error}"))?;
+                return Ok(port);
+            }
+            Err(error) => {
+                last_error = error.to_string();
+            }
+        }
+    }
+
+    Err(format!(
+        "No available backend port found in range {start}-{}: {last_error}",
+        start.saturating_add(49)
+    ))
+}
 
 mod process_lifecycle;
 use process_lifecycle::{kill_process_tree, ProcessSupervisor};
@@ -709,8 +746,14 @@ impl BackendHandle {
             return Err(format!("Backend directory not found: {}", backend_dir.display()));
         }
 
+        let port = claim_backend_port(&self.data_dir)?;
+
         let mut command = self.app.shell().command("python");
-        command = command.args(["main.py"]).current_dir(&backend_dir).env("NXTRIVE_DATA_DIR", &self.data_dir);
+        command = command
+            .args(["main.py"])
+            .current_dir(&backend_dir)
+            .env("NXTRIVE_DATA_DIR", &self.data_dir)
+            .env(BACKEND_PORT_ENV, port.to_string());
 
         if let Some(venv_bin) = dev_venv_bin_dir(&backend_dir) {
             let path = std::env::var("PATH").unwrap_or_default();
@@ -730,11 +773,14 @@ impl BackendHandle {
             .resource_dir()
             .map_err(|error| format!("Failed to resolve resource directory: {error}"))?;
 
+        let port = claim_backend_port(&self.data_dir)?;
+
         self.app
             .shell()
             .sidecar("nxtrive-backend")
             .map_err(|error| format!("Failed to resolve sidecar binary: {error}"))?
             .env("NXTRIVE_DATA_DIR", &self.data_dir)
+            .env(BACKEND_PORT_ENV, port.to_string())
             .current_dir(resource_dir)
             .spawn()
             .map_err(|error| format!("Failed to spawn backend sidecar: {error}"))
@@ -766,7 +812,7 @@ impl BackendHandle {
             *guard = None;
         }
 
-        let port_file = PathBuf::from(&self.data_dir).join("backend.port");
+        let port_file = PathBuf::from(&self.data_dir).join(BACKEND_PORT_FILE);
         let _ = std::fs::remove_file(port_file);
     }
 
@@ -786,7 +832,7 @@ impl BackendHandle {
             *guard = None;
         }
 
-        let port_file = PathBuf::from(&self.data_dir).join("backend.port");
+        let port_file = PathBuf::from(&self.data_dir).join(BACKEND_PORT_FILE);
         let _ = std::fs::remove_file(port_file);
 
         thread::sleep(Duration::from_millis(800));
@@ -838,7 +884,7 @@ fn peek_backend_port(app: tauri::AppHandle) -> Result<Option<u16>, String> {
         .path()
         .app_data_dir()
         .map_err(|error| error.to_string())?;
-    let port_file = data_dir.join("backend.port");
+    let port_file = data_dir.join(BACKEND_PORT_FILE);
 
     match std::fs::read_to_string(&port_file) {
         Ok(content) => match content.trim().parse::<u16>() {
@@ -851,24 +897,21 @@ fn peek_backend_port(app: tauri::AppHandle) -> Result<Option<u16>, String> {
 
 #[tauri::command]
 fn get_backend_url(app: tauri::AppHandle, timeout_ms: Option<u64>) -> Result<String, String> {
+    // Soft peek only. Long waits live in the TypeScript health poller so the UI
+    // stays responsive while Python finishes cold-start imports.
+    let _ = timeout_ms;
     let data_dir = app
         .path()
         .app_data_dir()
         .map_err(|error| error.to_string())?;
-    let port_file = data_dir.join("backend.port");
-    let max_wait_ms = timeout_ms.unwrap_or(180_000);
-    let step_ms = 100u64;
-    let attempts = (max_wait_ms / step_ms).max(1);
+    let port_file = data_dir.join(BACKEND_PORT_FILE);
 
-    for _ in 0..attempts {
-        if let Ok(content) = std::fs::read_to_string(&port_file) {
-            if let Ok(port) = content.trim().parse::<u16>() {
-                if port > 0 {
-                    return Ok(format!("http://127.0.0.1:{port}"));
-                }
+    if let Ok(content) = std::fs::read_to_string(&port_file) {
+        if let Ok(port) = content.trim().parse::<u16>() {
+            if port > 0 {
+                return Ok(format!("http://127.0.0.1:{port}"));
             }
         }
-        thread::sleep(Duration::from_millis(step_ms));
     }
 
     Err("Backend port is not available yet.".to_string())

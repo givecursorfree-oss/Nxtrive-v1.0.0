@@ -1,4 +1,4 @@
-import { useEffect, useMemo, type CSSProperties } from "react";
+import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import { motion, useReducedMotion } from "motion/react";
 import {
   ArrowPathIcon,
@@ -20,6 +20,7 @@ import { buildPrerequisites } from "@/lib/setup-prerequisites";
 import {
   buildStepFluxPhases,
   computeSetupProgress,
+  formatElapsed,
   getActiveVerificationStepIndex,
   setupProgressDetail,
 } from "@/lib/setup-progress";
@@ -39,6 +40,7 @@ interface OllamaSetupGateProps {
   ollamaStatus: OllamaStatus | null;
   backendError: string | null;
   backendAttempt: number;
+  startedAt?: number;
   onRecheck: () => void;
   installNotice: string | null;
   pulling: boolean;
@@ -58,6 +60,7 @@ export function OllamaSetupGate({
   ollamaStatus,
   backendError,
   backendAttempt,
+  startedAt,
   onRecheck,
   installNotice,
   pulling,
@@ -73,6 +76,18 @@ export function OllamaSetupGate({
   const backendInstallUrl = ollamaStatus?.install_url;
   const requiredModels = ollamaStatus?.required_models ?? [];
   const missingModels = ollamaStatus?.missing_models ?? [];
+  const [now, setNow] = useState(() => Date.now());
+
+  useEffect(() => {
+    if (phase === "ready") return;
+    const timer = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, [phase]);
+
+  const elapsedSeconds = Math.max(
+    0,
+    Math.floor((now - (startedAt ?? now)) / 1000),
+  );
 
   useEffect(() => {
     if (phase !== "install-ollama") return;
@@ -105,7 +120,7 @@ export function OllamaSetupGate({
 
   const title =
     phase === "backend-offline"
-      ? `Starting ${BRAND_NAME}…`
+      ? `Starting ${BRAND_NAME}`
       : phase === "install-ollama"
         ? `${BRAND_NAME} needs Ollama`
         : phase === "start-ollama"
@@ -114,7 +129,7 @@ export function OllamaSetupGate({
             ? "Downloading AI models"
             : ollamaStatus?.ready
               ? "All set"
-              : "Checking prerequisites…";
+              : "Checking prerequisites";
 
   const backendPort = getCachedBackendPort();
 
@@ -151,6 +166,7 @@ export function OllamaSetupGate({
     prerequisiteItems,
     activeStepIndex,
     checking,
+    elapsedSeconds,
   );
 
   const setupNearlyDone =
@@ -161,10 +177,14 @@ export function OllamaSetupGate({
     ollamaStatus?.ready;
 
   const showFluxLoader = !setupNearlyDone && phase !== "ready";
+  const showStartupRetry =
+    phase === "backend-offline" && (elapsedSeconds >= 8 || Boolean(backendError));
 
   const description =
     phase === "backend-offline"
-      ? `Starting the local app service${backendPort ? ` on port ${backendPort}` : ""}…`
+      ? elapsedSeconds < 8
+        ? "Preparing your private workspace. First launch can take a moment while the local service starts."
+        : `Still starting the local service${backendPort ? ` on port ${backendPort}` : ""}. This is normal on a cold start.`
       : phase === "install-ollama"
         ? isTauriApp()
           ? "We're opening Terminal and running the official Ollama installer for your system automatically."
@@ -201,14 +221,24 @@ export function OllamaSetupGate({
         animate={{ opacity: 1, y: 0, scale: 1, filter: "blur(0px)" }}
         transition={{ duration: ENTER_DURATION, ease: ENTER_EASE, delay: reduceMotion ? 0 : 0.28 }}
       >
-        <div className="mb-6 flex items-center gap-3">
-          <div className="flex h-12 w-12 items-center justify-center rounded-card bg-paper-white p-1.5 shadow-subtle-3">
+        <div className="mb-6 flex items-start gap-3">
+          <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-card bg-paper-white p-1.5 shadow-subtle-3">
             <BrandLogoMark className="h-9 w-9" aria-hidden />
           </div>
-          <div>
-            <h1 id="setup-gate-title" className="type-subheading font-semibold text-deep-ink">
-              {title}
-            </h1>
+          <div className="min-w-0 flex-1">
+            <div className="flex items-start justify-between gap-3">
+              <h1 id="setup-gate-title" className="type-subheading font-semibold text-deep-ink">
+                {title}
+              </h1>
+              {(phase === "backend-offline" || phase === "checking") && (
+                <span
+                  className="shrink-0 rounded-full bg-paper-white px-2.5 py-1 type-caption font-medium tabular-nums text-slate ring-1 ring-mist"
+                  aria-label={`Elapsed ${formatElapsed(elapsedSeconds)}`}
+                >
+                  {formatElapsed(elapsedSeconds)}
+                </span>
+              )}
+            </div>
             <p id="setup-gate-desc" className="mt-1 type-body-sm text-slate">
               {description}
             </p>
@@ -285,7 +315,7 @@ export function OllamaSetupGate({
           </div>
         )}
 
-        {(backendError || pullError) && !(phase === "backend-offline" && checking) && (
+        {(backendError || pullError) && !(phase === "backend-offline" && checking && !backendError) && (
           <div
             role="alert"
             className="mb-6 flex items-start gap-2 rounded-button border border-ember-orange/40 bg-ember-orange/5 px-3 py-2 type-caption text-ember-orange"
@@ -315,15 +345,15 @@ export function OllamaSetupGate({
           </div>
         )}
 
-        <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
-          {phase === "backend-offline" && backendError && (
+        <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
+          {showStartupRetry && (
             <Button
-              variant="ghost"
+              variant="primary"
               loading={checking}
               onClick={onRecheck}
               icon={<ArrowPathIcon className="h-4 w-4 shrink-0" aria-hidden />}
             >
-              Retry now
+              Retry startup
             </Button>
           )}
 
@@ -350,23 +380,12 @@ export function OllamaSetupGate({
 
           {(phase === "checking" ||
             phase === "start-ollama" ||
-            (phase === "backend-offline" && checking)) && (
+            (phase === "backend-offline" && checking && !showStartupRetry)) && (
             <p className="type-caption text-helper" role="status" aria-live="polite">
               {checking
-                ? "Hang tight — we're setting things up automatically."
+                ? "Working automatically — you can leave this window open."
                 : "Setup paused. Use Retry if this takes longer than a minute."}
             </p>
-          )}
-
-          {phase === "backend-offline" && !checking && !backendError && (
-            <Button
-              variant="ghost"
-              loading={checking}
-              onClick={onRecheck}
-              icon={<ArrowPathIcon className="h-4 w-4 shrink-0" aria-hidden />}
-            >
-              Retry
-            </Button>
           )}
 
           {(phase === "install-ollama" || phase === "start-ollama" || phase === "download-models") &&

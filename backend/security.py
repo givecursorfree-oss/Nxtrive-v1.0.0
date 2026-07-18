@@ -72,7 +72,8 @@ def validate_folder_path(folder_path: str) -> Path:
         raise HTTPException(status_code=400, detail="Invalid folder path") from exc
 
     if not resolved.exists() or not resolved.is_dir():
-        raise HTTPException(status_code=400, detail=f"Folder not found: {folder_path}")
+        # Do not echo the raw path — it can include the Windows username.
+        raise HTTPException(status_code=400, detail="Folder not found")
 
     return resolved
 

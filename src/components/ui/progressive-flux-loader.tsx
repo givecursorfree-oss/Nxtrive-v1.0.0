@@ -54,11 +54,11 @@ export interface ProgressiveFluxLoaderProps {
 /* ── constants ───────────────────────────────────────────────── */
 
 const DEFAULT_PHASES: ProgressiveFluxPhase[] = [
-  { at: 0, label: "starting up" },
-  { at: 25, label: "loading assets" },
-  { at: 55, label: "preparing magic" },
-  { at: 80, label: "almost there" },
-  { at: 100, label: "all done" },
+  { at: 0, label: "Starting up" },
+  { at: 25, label: "Loading assets" },
+  { at: 55, label: "Preparing workspace" },
+  { at: 80, label: "Almost there" },
+  { at: 100, label: "All done" },
 ];
 
 const FLUX_FROM = "var(--flux-from, #1d6ffb)";
