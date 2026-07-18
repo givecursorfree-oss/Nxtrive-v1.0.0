@@ -42,7 +42,6 @@ from security import (
 )
 from errors import format_ollama_error
 from privacy import sanitize_error_message
-from ingestor import DocumentIngestor
 from models import (
     ChatRequest,
     CollectionSourcesResponse,
@@ -64,25 +63,29 @@ from ollama_checker import (
     refresh_ollama_cache,
 )
 from process_registry import terminate_tracked_processes
-from retriever import DocumentRetriever
 
 logger = logging.getLogger(__name__)
 
-ingestor: DocumentIngestor | None = None
-retriever: DocumentRetriever | None = None
+# Lazy-loaded — chromadb imports are heavy and must not block /health on cold start.
+ingestor = None
+retriever = None
 BACKEND_PORT: int | None = None
 
 
-def get_ingestor() -> DocumentIngestor:
+def get_ingestor():
     global ingestor
     if ingestor is None:
+        from ingestor import DocumentIngestor
+
         ingestor = DocumentIngestor()
     return ingestor
 
 
-def get_retriever() -> DocumentRetriever:
+def get_retriever():
     global retriever
     if retriever is None:
+        from retriever import DocumentRetriever
+
         retriever = DocumentRetriever()
     return retriever
 

@@ -4,6 +4,7 @@ import {
   backendWarmupMs,
   bootstrapBackend,
   ensureBackendStarted,
+  peekBackendError,
   restartBackend,
   sleep,
 } from "../lib/backend-lifecycle";
@@ -35,6 +36,16 @@ function resolvePhase(backendOnline: boolean, status: OllamaStatus | null): Setu
   return "ready";
 }
 
+function formatBackendCrash(message: string): string {
+  if (/Failed to load Python DLL|python3\d+\.dll|Invalid access to memory location/i.test(message)) {
+    return "The local service failed to start (runtime unpack error). Reinstall Nxtrive, then click Retry startup. If it persists, temporarily allow Nxtrive in antivirus.";
+  }
+  if (/Failed to spawn|Failed to resolve sidecar/i.test(message)) {
+    return "The local service binary could not be started. Reinstall Nxtrive and try again.";
+  }
+  return formatUserFacingError(message);
+}
+
 function formatBackendError(err: unknown, attempt: number): string | null {
   if (attempt < SHOW_STATUS_AFTER_ATTEMPTS) return null;
 
@@ -48,7 +59,7 @@ function formatBackendError(err: unknown, attempt: number): string | null {
       ? "The local service is taking longer than expected. You can retry or keep waiting."
       : "Still starting the local service…";
   }
-  return formatUserFacingError(message);
+  return formatBackendCrash(message);
 }
 
 export function useSetupGate() {
@@ -104,10 +115,18 @@ export function useSetupGate() {
           attemptRef.current % RESTART_EVERY_ATTEMPTS === 0
         ) {
           resetApiBaseUrl();
-          await restartBackend();
+          try {
+            await restartBackend();
+          } catch {
+            // Health poll + backend.error file will surface the failure.
+          }
           await sleep(1200);
         } else if (isTauriApp() && attemptRef.current === 1) {
-          await ensureBackendStarted();
+          try {
+            await ensureBackendStarted();
+          } catch {
+            // Continue to health poll / crash diagnostics.
+          }
         }
 
         await sleep(backendWarmupMs(attemptRef.current));
@@ -115,7 +134,11 @@ export function useSetupGate() {
         attemptRef.current = 1;
         setBackendAttempt(1);
         if (isTauriApp()) {
-          await ensureBackendStarted();
+          try {
+            await ensureBackendStarted();
+          } catch {
+            // Continue to health poll / crash diagnostics.
+          }
           await sleep(backendWarmupMs(1));
         }
       }
@@ -139,7 +162,13 @@ export function useSetupGate() {
       } catch (err) {
         if (!isCurrent()) return;
         setBackendOnline(false);
-        setBackendError(formatBackendError(err, attemptRef.current));
+        const crashHint = await peekBackendError();
+        if (!isCurrent()) return;
+        setBackendError(
+          crashHint
+            ? formatBackendCrash(crashHint)
+            : formatBackendError(err, attemptRef.current),
+        );
         setOllamaStatus(null);
         setPhase("backend-offline");
         return;

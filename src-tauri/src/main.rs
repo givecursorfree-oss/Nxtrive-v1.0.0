@@ -15,7 +15,9 @@ use tauri_plugin_shell::ShellExt;
 
 const DEFAULT_BACKEND_PORT: u16 = 8742;
 const BACKEND_PORT_FILE: &str = "backend.port";
+const BACKEND_ERROR_FILE: &str = "backend.error";
 const BACKEND_PORT_ENV: &str = "NXTRIVE_BACKEND_PORT";
+const EARLY_EXIT_RESTART_LIMIT: u32 = 3;
 
 /// Reserve a local TCP port and publish it immediately so the UI can poll
 /// while Python finishes importing heavy dependencies.
@@ -642,6 +644,7 @@ struct BackendHandle {
     backend_pid: Arc<Mutex<Option<u32>>>,
     shutting_down: Arc<AtomicBool>,
     spawned_at: Arc<Mutex<Option<Instant>>>,
+    early_exit_restarts: Arc<Mutex<u32>>,
     process_supervisor: ProcessSupervisor,
 }
 
@@ -654,8 +657,19 @@ impl BackendHandle {
             backend_pid: Arc::new(Mutex::new(None)),
             shutting_down: Arc::new(AtomicBool::new(false)),
             spawned_at: Arc::new(Mutex::new(None)),
+            early_exit_restarts: Arc::new(Mutex::new(0)),
             process_supervisor,
         }
+    }
+
+    fn write_backend_error(&self, message: &str) {
+        let path = PathBuf::from(&self.data_dir).join(BACKEND_ERROR_FILE);
+        let _ = std::fs::write(path, message);
+    }
+
+    fn clear_backend_error(&self) {
+        let path = PathBuf::from(&self.data_dir).join(BACKEND_ERROR_FILE);
+        let _ = std::fs::remove_file(path);
     }
 
     fn spawn(&self) -> Result<(), String> {
@@ -675,7 +689,13 @@ impl BackendHandle {
             self.spawn_release_sidecar()
         };
 
-        let (mut rx, child) = spawn_result?;
+        let (mut rx, child) = match spawn_result {
+            Ok(value) => value,
+            Err(error) => {
+                self.write_backend_error(&error);
+                return Err(error);
+            }
+        };
         let pid = child.pid();
 
         if let Ok(mut guard) = self.child.lock() {
@@ -687,17 +707,25 @@ impl BackendHandle {
         if let Ok(mut guard) = self.spawned_at.lock() {
             *guard = Some(Instant::now());
         }
+        self.clear_backend_error();
         self.process_supervisor.assign_child(pid);
 
         let handle = self.clone();
         tauri::async_runtime::spawn(async move {
+            let mut stderr_tail = String::new();
             while let Some(event) = rx.recv().await {
                 match event {
                     CommandEvent::Stdout(line) => {
                         eprintln!("Nxtrive backend: {}", String::from_utf8_lossy(&line));
                     }
                     CommandEvent::Stderr(line) => {
-                        eprintln!("Nxtrive backend error: {}", String::from_utf8_lossy(&line));
+                        let text = String::from_utf8_lossy(&line);
+                        eprintln!("Nxtrive backend error: {text}");
+                        stderr_tail.push_str(&text);
+                        if stderr_tail.len() > 4000 {
+                            let keep = stderr_tail.len() - 4000;
+                            stderr_tail = stderr_tail[keep..].to_string();
+                        }
                     }
                     CommandEvent::Terminated(payload) => {
                         eprintln!("Nxtrive backend terminated: {:?}", payload.code);
@@ -717,23 +745,52 @@ impl BackendHandle {
                 return;
             }
 
-            let within_grace_period = handle
+            let early_exit = handle
                 .spawned_at
                 .lock()
                 .ok()
                 .and_then(|guard| *guard)
                 .is_some_and(|started| started.elapsed() < Duration::from_secs(45));
 
-            if within_grace_period {
-                return;
+            if !stderr_tail.trim().is_empty() {
+                handle.write_backend_error(stderr_tail.trim());
+            } else if early_exit {
+                handle.write_backend_error(
+                    "Local service exited before it became ready. Retry startup or reinstall.",
+                );
             }
 
-            thread::sleep(Duration::from_secs(2));
+            // Always attempt a few quick restarts after early crashes (e.g. PyInstaller unpack).
+            // Previously we skipped restart for 45s, which left the UI stuck forever.
+            if early_exit {
+                let restart_count = handle
+                    .early_exit_restarts
+                    .lock()
+                    .ok()
+                    .map(|mut guard| {
+                        *guard += 1;
+                        *guard
+                    })
+                    .unwrap_or(EARLY_EXIT_RESTART_LIMIT);
+
+                if restart_count > EARLY_EXIT_RESTART_LIMIT {
+                    return;
+                }
+
+                thread::sleep(Duration::from_millis(800 * restart_count as u64));
+            } else {
+                if let Ok(mut guard) = handle.early_exit_restarts.lock() {
+                    *guard = 0;
+                }
+                thread::sleep(Duration::from_secs(2));
+            }
+
             if handle.shutting_down.load(Ordering::SeqCst) {
                 return;
             }
             if let Err(error) = handle.spawn() {
                 eprintln!("Failed to restart backend: {error}");
+                handle.write_backend_error(&error);
             }
         });
 
@@ -821,6 +878,9 @@ impl BackendHandle {
             return Ok(());
         }
         self.shutting_down.store(false, Ordering::SeqCst);
+        if let Ok(mut guard) = self.early_exit_restarts.lock() {
+            *guard = 0;
+        }
         if let Ok(mut guard) = self.child.lock() {
             if let Some(child) = guard.take() {
                 let child_pid = child.pid();
@@ -834,6 +894,7 @@ impl BackendHandle {
 
         let port_file = PathBuf::from(&self.data_dir).join(BACKEND_PORT_FILE);
         let _ = std::fs::remove_file(port_file);
+        self.clear_backend_error();
 
         thread::sleep(Duration::from_millis(800));
         self.spawn()
@@ -896,6 +957,27 @@ fn peek_backend_port(app: tauri::AppHandle) -> Result<Option<u16>, String> {
 }
 
 #[tauri::command]
+fn peek_backend_error(app: tauri::AppHandle) -> Result<Option<String>, String> {
+    let data_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|error| error.to_string())?;
+    let error_file = data_dir.join(BACKEND_ERROR_FILE);
+
+    match std::fs::read_to_string(&error_file) {
+        Ok(content) => {
+            let trimmed = content.trim();
+            if trimmed.is_empty() {
+                Ok(None)
+            } else {
+                Ok(Some(trimmed.to_string()))
+            }
+        }
+        Err(_) => Ok(None),
+    }
+}
+
+#[tauri::command]
 fn get_backend_url(app: tauri::AppHandle, timeout_ms: Option<u64>) -> Result<String, String> {
     // Soft peek only. Long waits live in the TypeScript health poller so the UI
     // stays responsive while Python finishes cold-start imports.
@@ -950,6 +1032,7 @@ fn main() {
             spawn_ollama_install_terminal,
             restart_backend,
             peek_backend_port,
+            peek_backend_error,
             get_backend_url,
             ensure_backend_started,
             shutdown_app

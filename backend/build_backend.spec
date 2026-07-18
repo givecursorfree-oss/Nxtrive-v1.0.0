@@ -1,7 +1,13 @@
 # -*- mode: python ; coding: utf-8 -*-
+"""
+Onefile sidecar for Tauri.
 
-import platform
-import sys
+IMPORTANT: never enable `strip` on Windows — it corrupts bundled DLLs and causes:
+  Failed to load Python DLL '...\\_MEI...\\python312.dll'
+  LoadLibrary: Invalid access to memory location.
+"""
+
+import os
 from pathlib import Path
 
 from PyInstaller.utils.hooks import collect_all
@@ -64,6 +70,13 @@ a = Analysis(
 
 pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
 
+# Prefer a stable unpack dir over %TEMP% (AV scanners often break _MEI extracts).
+# Must use env-var placeholders expanded at runtime — never bake the build-machine path.
+if os.name == "nt":
+    _runtime_tmpdir = r"%LOCALAPPDATA%\Nxtrive\pyi-runtime"
+else:
+    _runtime_tmpdir = "$HOME/.cache/Nxtrive/pyi-runtime"
+
 exe = EXE(
     pyz,
     a.scripts,
@@ -74,10 +87,11 @@ exe = EXE(
     name="nxtrive-backend",
     debug=False,
     bootloader_ignore_signals=False,
-    strip=platform.system() in {"Windows", "Linux"},
+    # strip=True on Windows breaks python3xx.dll LoadLibrary — keep False everywhere.
+    strip=False,
     upx=False,
     upx_exclude=[],
-    runtime_tmpdir=None,
+    runtime_tmpdir=_runtime_tmpdir,
     console=True,
     disable_windowed_traceback=False,
     argv_emulation=False,

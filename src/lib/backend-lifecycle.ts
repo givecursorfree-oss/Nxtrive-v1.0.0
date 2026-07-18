@@ -9,63 +9,53 @@ let bootstrapStarted = false;
 
 
 /** Fire-and-forget backend spawn as early as possible when the desktop app opens. */
-
 export function bootstrapBackend(): void {
-
   if (!isTauriApp() || bootstrapStarted) return;
-
   bootstrapStarted = true;
-
-  void ensureBackendStarted();
-
+  void ensureBackendStarted().catch((error) => {
+    console.warn("bootstrapBackend failed", error);
+  });
 }
 
 
 
 export async function ensureBackendStarted(): Promise<void> {
-
   if (!isTauriApp()) return;
-
-
 
   try {
-
     const { invoke } = await import("@tauri-apps/api/core");
-
     await invoke("ensure_backend_started");
-
-  } catch {
-
-    // Spawn may already be in progress.
-
+  } catch (error) {
+    // Keep the original spawn error available for setup UI diagnostics.
+    console.warn("ensure_backend_started failed", error);
+    throw error instanceof Error ? error : new Error(String(error));
   }
-
 }
 
+export async function peekBackendError(): Promise<string | null> {
+  if (!isTauriApp()) return null;
 
+  try {
+    const { invoke } = await import("@tauri-apps/api/core");
+    const message = await invoke<string | null>("peek_backend_error");
+    return message?.trim() ? message.trim() : null;
+  } catch {
+    return null;
+  }
+}
 
 export async function restartBackend(): Promise<void> {
-
   if (!isTauriApp()) return;
-
-
 
   resetApiBaseUrl();
 
-
-
   try {
-
     const { invoke } = await import("@tauri-apps/api/core");
-
     await invoke("restart_backend");
-
-  } catch {
-
-    // Backend may already be starting; health polling will confirm.
-
+  } catch (error) {
+    console.warn("restart_backend failed", error);
+    throw error instanceof Error ? error : new Error(String(error));
   }
-
 }
 
 
