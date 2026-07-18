@@ -12,6 +12,10 @@ import { resetApiBaseUrl } from "../lib/api-base";
 import { BRAND_NAME } from "../lib/brand";
 import { isTauriApp } from "../lib/ollama-download";
 import { formatUserFacingError } from "../lib/user-errors";
+import {
+  DEFAULT_REQUIRED_MODELS,
+  isSetupFullyReady,
+} from "../lib/setup-prerequisites";
 
 export type SetupPhase =
   | "checking"
@@ -27,12 +31,42 @@ const RESUME_DEBOUNCE_MS = 400;
 const RESTART_EVERY_ATTEMPTS = 8;
 const SHOW_STATUS_AFTER_ATTEMPTS = 2;
 
+function normalizeOllamaStatus(status: OllamaStatus): OllamaStatus {
+  const required =
+    status.required_models?.length > 0
+      ? status.required_models
+      : [...DEFAULT_REQUIRED_MODELS];
+  const models = status.models ?? [];
+  const missing =
+    status.missing_models?.length > 0
+      ? status.missing_models
+      : required.filter(
+          (model) =>
+            !models.some((name) => name === model || name.startsWith(`${model}:`)),
+        );
+
+  const installed = Boolean(status.installed);
+  const running = Boolean(status.running);
+  const ready = installed && running && missing.length === 0 && Boolean(status.ready);
+
+  return {
+    ...status,
+    installed,
+    running,
+    models,
+    required_models: required,
+    missing_models: missing,
+    ready,
+  };
+}
+
 function resolvePhase(backendOnline: boolean, status: OllamaStatus | null): SetupPhase {
   if (!backendOnline) return "backend-offline";
   if (!status) return "checking";
   if (!status.installed) return "install-ollama";
   if (!status.running) return "start-ollama";
   if (!status.ready || status.missing_models.length > 0) return "download-models";
+  if (!isSetupFullyReady(true, status)) return "download-models";
   return "ready";
 }
 
@@ -175,7 +209,7 @@ export function useSetupGate() {
       }
 
       try {
-        const status = await fetchOllamaStatus();
+        const status = normalizeOllamaStatus(await fetchOllamaStatus());
         if (!isCurrent()) return;
         setOllamaStatus(status);
         setPhase(resolvePhase(online, status));
@@ -183,8 +217,10 @@ export function useSetupGate() {
       } catch (err) {
         if (!isCurrent()) return;
         const message = err instanceof Error ? err.message : "Failed to check Ollama";
+        // Keep the gate up — never treat a failed Ollama check as "ready".
+        setOllamaStatus(null);
         setBackendError(message === "Failed to fetch" ? null : formatUserFacingError(message));
-        setPhase("backend-offline");
+        setPhase(online ? "checking" : "backend-offline");
       }
     } finally {
       if (isCurrent()) {

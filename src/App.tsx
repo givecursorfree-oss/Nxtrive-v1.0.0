@@ -34,6 +34,9 @@ import { useFolderDropActions } from "./hooks/useFolderDropActions";
 import { isOnboardingDone, isSetupDisclaimerSeen } from "./lib/storage";
 import { dismissOnboardingFlow, ONBOARDING_DISMISSED_EVENT } from "./lib/onboarding-events";
 import { NXTRIVE_REPLAY_WELCOME } from "./lib/app-events";
+import { isSetupFullyReady } from "./lib/setup-prerequisites";
+
+const SETUP_UNLOCK_DELAY_MS = 1400;
 
 const Sidebar = lazy(() =>
   import("./components/Sidebar").then((m) => ({ default: m.Sidebar }))
@@ -69,6 +72,7 @@ export default function App() {
   const [showWelcome, setShowWelcome] = useState(true);
   const [postWelcome, setPostWelcome] = useState(false);
   const [showSetupNotice, setShowSetupNotice] = useState(false);
+  const [allowEnterApp, setAllowEnterApp] = useState(false);
 
   const [showOnboarding, setShowOnboarding] = useState(false);
   const onboardingSuppressedRef = useRef(false);
@@ -83,7 +87,38 @@ export default function App() {
     onRecheck: () => void setup.recheck(),
   });
 
-  const setupComplete = setup.phase === "ready";
+  const prerequisitesReady = isSetupFullyReady(
+    setup.backendOnline,
+    setup.ollamaStatus,
+  );
+  // Never open the main shell until welcome is done AND every prerequisite
+  // (app service, Ollama, models) has been verified.
+  const setupComplete = !showWelcome && allowEnterApp && prerequisitesReady;
+
+  useEffect(() => {
+    if (showWelcome || showSetupNotice) {
+      setAllowEnterApp(false);
+      return;
+    }
+
+    if (!prerequisitesReady || setup.checking || setup.phase !== "ready") {
+      setAllowEnterApp(false);
+      return;
+    }
+
+    // Show the "All set" gate briefly so verification is visible, then enter.
+    const timer = window.setTimeout(() => {
+      setAllowEnterApp(true);
+    }, SETUP_UNLOCK_DELAY_MS);
+
+    return () => window.clearTimeout(timer);
+  }, [
+    showWelcome,
+    showSetupNotice,
+    prerequisitesReady,
+    setup.checking,
+    setup.phase,
+  ]);
 
   const { online, retrying, retry } = useBackendHealth(setupComplete);
 
@@ -213,6 +248,8 @@ export default function App() {
             onEnterStart={() => setPostWelcome(true)}
             onEnterComplete={() => {
               setShowWelcome(false);
+              setAllowEnterApp(false);
+              void setup.recheck();
               if (!isSetupDisclaimerSeen()) {
                 setShowSetupNotice(true);
               }

@@ -58,11 +58,11 @@ export function verificationStepLabel(
   activeIndex: number,
   checking: boolean,
 ): string {
+  // Never mark a step Verified unless its own status is ready.
   if (item.status === "ready") return "Verified";
   if (item.status === "working") return "Verifying now…";
   if (item.status === "missing") return "Action needed";
   if (stepIndex === activeIndex && checking) return "Verifying now…";
-  if (stepIndex < activeIndex) return "Verified";
   return "Up next";
 }
 

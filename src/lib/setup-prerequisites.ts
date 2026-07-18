@@ -150,3 +150,34 @@ export function prerequisitesMet(items: PrerequisiteItem[]): boolean {
 export function missingPrerequisiteCount(items: PrerequisiteItem[]): number {
   return items.filter((item) => item.status === "missing").length;
 }
+
+function modelSatisfied(required: string, installed: readonly string[]): boolean {
+  return installed.some(
+    (name) => name === required || name.startsWith(`${required}:`),
+  );
+}
+
+/**
+ * Strict unlock check — the app shell must not open until the backend and
+ * Ollama (installed + running + every required model) are confirmed.
+ */
+export function isSetupFullyReady(
+  backendOnline: boolean,
+  status: OllamaStatus | null,
+): boolean {
+  if (!backendOnline || !status) return false;
+  if (!status.installed || !status.running || !status.ready) return false;
+  if (status.missing_models.length > 0) return false;
+
+  const required =
+    status.required_models.length > 0
+      ? status.required_models
+      : [...DEFAULT_REQUIRED_MODELS];
+
+  if (required.length === 0) return false;
+
+  return (
+    required.every((model) => modelSatisfied(model, status.models)) &&
+    prerequisitesMet(buildPrerequisites(backendOnline, status))
+  );
+}
